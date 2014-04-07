@@ -1,12 +1,18 @@
 ﻿using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Dynamic;
 using System.Linq;
 
 namespace FluentObjects
 {
     public partial class FluentObject
     {
+        private bool IsExpandoObject(Type type)
+        {
+            return typeof(ExpandoObject).IsAssignableFrom(type);
+        }
+
         private bool IsGenericDictionary(Type type)
         {
             return type.IsGenericType && type.GetGenericTypeDefinition() == typeof(IDictionary<,>) ||
@@ -38,6 +44,76 @@ namespace FluentObjects
         private bool IsEnumerable(Type type)
         {
             return typeof(IEnumerable).IsAssignableFrom(type);
+        }
+
+        private object ConvertToExpandoObject()
+        {
+            ExpandoObject result = (ExpandoObject)Activator.CreateInstance(typeof(ExpandoObject));
+
+            IDictionary<string, object> dict = result;
+
+            // ConvertValue not working properly!
+
+            foreach (KeyValuePair<object, dynamic> element in _dictionaryElements)
+            {
+                dict.Add(element.Key.ToString(), ConvertValue(element.Value));
+            }
+
+            foreach (KeyValuePair<string, dynamic> attribute in _attributes)
+            {
+                dict.Add(attribute.Key, ConvertValue(attribute.Value));
+            }
+
+            return result;
+        }
+
+        private dynamic ConvertValue(object value)
+        {
+            if (value is FluentObject)
+            {
+                FluentObject fo = value as FluentObject;
+
+                // if all keys of value are ints, convert to array
+                var keys = fo.Keys;
+                int keyCount = keys.Count;
+
+                var attributes = fo._attributes;
+                var attributeCount = attributes.Count;
+
+                if (keyCount > 0 && attributeCount == 0)
+                {
+                    int parse = 0;
+                    int i = 0;
+
+                    int count = (from key in keys.Cast<object>()
+                                let intKey = key as int?
+                                let stringKey = key as string
+                                let parsed = stringKey != null && int.TryParse(stringKey, out parse)
+                                let parsedIntKey = intKey.HasValue ? intKey : parsed ? (int?)parse : null
+                                select parsedIntKey).Count(x => x == i++);
+
+                    if (count == keyCount)
+                    {
+                        value = 
+                            (from kv in
+                                 (Dictionary<int, FluentObject>)
+                                 fo.ConvertToGenericDictionary(typeof(Dictionary<int, FluentObject>))
+                             orderby kv.Key
+                             select kv.Value.ConvertToExpandoObject()).ToList();
+                    }
+                    else
+                    {
+                        value = fo.ConvertToExpandoObject();
+                    }
+                }
+                else
+                {
+                    value = fo.ConvertToExpandoObject();
+                }
+
+            }
+
+            return value;
         }
 
         private object ConvertToGenericDictionary(Type type)
@@ -172,7 +248,11 @@ namespace FluentObjects
             }
             else
             {
-                if (IsGenericDictionary(type))
+                if (IsExpandoObject(type))
+                {
+                    result = ConvertToExpandoObject();
+                }
+                else if (IsGenericDictionary(type))
                 {
                     result = ConvertToGenericDictionary(type);
                 }

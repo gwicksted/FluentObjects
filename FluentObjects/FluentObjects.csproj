@@ -45,6 +45,7 @@
     <Compile Include="FluentObject.cs" />
     <Compile Include="FluentObject.Dictionary.cs" />
     <Compile Include="FluentObject.From.cs" />
+    <Compile Include="FluentObject.Xml.cs" />
     <Compile Include="Properties\Annotations.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>

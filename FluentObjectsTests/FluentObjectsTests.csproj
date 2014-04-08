@@ -50,6 +50,7 @@
   <ItemGroup>
     <Compile Include="TestFluentObject.cs" />
     <Compile Include="TestFluentObjectToJson.cs" />
+    <Compile Include="TestFluentObjectXmlSerializer.cs" />
     <Compile Include="TestFormContext.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>

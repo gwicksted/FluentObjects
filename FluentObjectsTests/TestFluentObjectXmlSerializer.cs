@@ -57,6 +57,9 @@ namespace FluentObjectsTests
             o.test[0].element = "true";
             o.test[1].element = "false";
 
+            Assert.AreEqual("true", o.test[0].element);
+            Assert.AreEqual("false", o.test[1].element);
+
             XmlSerializer x = new XmlSerializer(typeof(FluentObject));
 
             string output;
@@ -67,7 +70,20 @@ namespace FluentObjectsTests
                 output = GetUtf8FromMemoryStream(stream);
             }
 
-            Assert.AreEqual("<?xml version=\"1.0\"?>\r\n<FluentObject>\r\n  <test>\r\n    <test element=\"true\" />\r\n    <test element=\"false\" />\r\n  </test>\r\n</FluentObject>", output);
+            const string xml = "<?xml version=\"1.0\"?>\r\n<FluentObject>\r\n  <test>\r\n    <test element=\"true\" />\r\n    <test element=\"false\" />\r\n  </test>\r\n</FluentObject>";
+            Assert.AreEqual(xml, output);
+            byte[] buffer = Encoding.UTF8.GetBytes(xml);
+            using (Stream stream = new MemoryStream(buffer))
+            {
+                dynamic result = x.Deserialize(stream);
+
+                // TODO: not quite equal (utf-16 decl)
+                //string resultXml = ((FluentObject)result).ToXmlString("FluentObject");
+                //Assert.AreEqual(xml, resultXml);
+
+                Assert.AreEqual("true", result.test[0].element);
+                Assert.AreEqual("false", result.test[1].element);
+            }
         }
 
         [Test]

@@ -1,6 +1,5 @@
 ﻿using System.CodeDom.Compiler;
 using System.Collections.Generic;
-using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -20,13 +19,15 @@ namespace FluentObjects
         // TODO: handle arrays
         public string ToXmlString(string name)
         {
+            const string typicalXmlTabulation = "  ";
+
             StringBuilder stringBuilder = new StringBuilder();
 
             // TODO: specify encoding as UTF-8
 
             using (TextWriter textWriter = new StringWriter(stringBuilder))
             {
-                using (TextWriter indentedTextWriter = new IndentedTextWriter(textWriter, "  "))
+                using (TextWriter indentedTextWriter = new IndentedTextWriter(textWriter, typicalXmlTabulation))
                 {
                     using (XmlWriter writer = new XmlTextWriter(indentedTextWriter))
                     {
@@ -43,10 +44,43 @@ namespace FluentObjects
             return stringBuilder.ToString();
         }
 
-        // TODO: handle arrays
         public void WriteXml(XmlWriter writer)
         {
             WriteXmlElement(writer, this, null);
+        }
+
+        private IEnumerable<KeyValuePair<string, string>> GetAttributes(FluentObject o)
+        {
+            // TODO: dictionary keys may not be valid xml attribute names
+            // TODO: should test to see if is native datatype (struct) vs object -- if object, it is element
+            return new[]
+                {
+                    from a in o._attributes
+                    where !(a.Value is FluentObject)
+                    select new KeyValuePair<string, string>(a.Key, a.Value.ToString()),
+
+                    from a in o._dictionaryElements
+                    where !(a.Value is FluentObject)
+                    select new KeyValuePair<string, string>(a.Key.ToString(), a.Value.ToString())
+                }.SelectMany(x => x);
+        }
+
+        private IEnumerable<KeyValuePair<string, dynamic>> GetElements(FluentObject o, string name)
+        {
+            return new[]
+                {
+                    from a in o._attributes 
+                    where a.Value is FluentObject 
+                    select a,
+                    
+                    from a in o._dictionaryElements
+                    where a.Value is FluentObject && a.Key is int
+                    select new KeyValuePair<string, dynamic>(name ?? "unnamed", a.Value),
+                    
+                    from a in o._dictionaryElements
+                    where a.Value is FluentObject && !(a.Key is int)
+                    select new KeyValuePair<string, dynamic>(a.Key.ToString(), a.Value)
+                }.SelectMany(x => x);
         }
 
         private void WriteXmlElement(XmlWriter writer, FluentObject elementFo, string name)
@@ -56,43 +90,15 @@ namespace FluentObjects
                 writer.WriteStartElement(name);
             }
 
-            // TODO: should test to see if is native datatype (struct) vs object -- if object, it is element
-            var xmlAttributes = (from a in elementFo._attributes where !(a.Value is FluentObject) select new KeyValuePair<string, string>(a.Key, a.Value.ToString()));
-            WriteXmlAttributes(writer, xmlAttributes);
-            // TODO: selectmany
-            // TODO: dictionary keys may not be valid xml attribute names
-            xmlAttributes = (from a in elementFo._dictionaryElements where !(a.Value is FluentObject) select new KeyValuePair<string, string>(a.Key.ToString(), a.Value.ToString()));
-            WriteXmlAttributes(writer, xmlAttributes);
-
-            if (name != null)
-            {
-                //writer.WriteEndElement();
-            }
-
+            WriteXmlAttributes(writer, GetAttributes(elementFo));
+            
             bool hasElements = false;
 
-            var xmlElements = (from a in elementFo._attributes where a.Value is FluentObject select a);
-            foreach (var xmlElement in xmlElements)
+            var elements = GetElements(elementFo, name);
+            foreach (var element in elements)
             {
-                // TODO: fix
                 hasElements = true;
-                WriteXmlElement(writer, xmlElement.Value, xmlElement.Key);
-            }
-            // TODO: selectmany
-            xmlElements = (from a in elementFo._dictionaryElements where a.Value is FluentObject && a.Key is int select new KeyValuePair<string, dynamic>(name ?? "unnamed", a.Value));
-            foreach (var xmlElement in xmlElements)
-            {
-                // TODO: if dictionary["abcd"], use key and value? (some dictionary keys may not be valid xml
-                hasElements = true; // TODO: fix
-                WriteXmlElement(writer, xmlElement.Value, xmlElement.Key);
-            }
-            // TODO: selectmany
-            xmlElements = (from a in elementFo._dictionaryElements where a.Value is FluentObject && !(a.Key is int) select new KeyValuePair<string, dynamic>(a.Key.ToString(), a.Value));
-            foreach (var xmlElement in xmlElements)
-            {
-                // TODO: if dictionary["abcd"], use key and value? (some dictionary keys may not be valid xml
-                hasElements = true; // TODO: fix
-                WriteXmlElement(writer, xmlElement.Value, xmlElement.Key);
+                WriteXmlElement(writer, element.Value, element.Key);
             }
 
             if (name != null)
@@ -118,40 +124,81 @@ namespace FluentObjects
 
         public void ReadXml(XmlReader reader)
         {
-            bool first = true;
-            //reader.ReadStartElement();
+            Stack<FluentObject> stack = new Stack<FluentObject>();
+            FluentObject current = this;
 
-            while (reader.NodeType != XmlNodeType.EndElement)
+            bool first = true;
+
+            while (true)
             {
-                // first name will always be FluentObject if WriteXml was used
-                if (first && reader.Name == "FluentObject")
+                if (reader.NodeType == XmlNodeType.EndElement)
                 {
-                    first = false;
+                    current = stack.Pop();
+                    if (!reader.Read())
+                    {
+                        break;
+                    }
                 }
                 else
                 {
-                    // TODO: check for existence, convert to array
-                    _dictionaryElements.Add(reader.Name, new FluentObject());
-                }
+                    var processed = new FluentObject();
 
-                if (reader.HasAttributes)
-                {
-                    while (reader.MoveToNextAttribute())
+                    if (first && reader.Name == "FluentObject")
                     {
-                        _attributes.Add(reader.Name, reader.Value);
+                        first = false;
+                        processed = this;
+                    }
+                    else
+                    {
+                        string name = reader.Name;
+
+                        // Parent shares same name, access parent attribute's dictionary to create an array with the same name
+                        if (stack.Peek()._attributes.ContainsKey(name))
+                        {
+                            var referenced = stack.Peek()._attributes[name];
+
+                            int i = 0;
+                            
+                            while (referenced._dictionaryElements.ContainsKey(i))
+                            {
+                                i++;
+                            }
+
+                            referenced._dictionaryElements.Add(i, processed);
+                        }
+                        else
+                        {
+                            current._attributes.Add(name, processed);
+                        }
+
+                    }
+                    
+                    if (reader.HasAttributes)
+                    {
+                        while (reader.MoveToNextAttribute())
+                        {
+                            processed._attributes.Add(reader.Name, reader.Value);
+                        }
+                    }
+
+
+                    reader.MoveToContent();
+                    int depth = reader.Depth;
+
+                    if (!reader.Read())
+                    {
+                        break;
+                    }
+
+                    if (reader.Depth > depth)
+                    {
+                        stack.Push(current);
+                        current = processed;
+
+                        reader.MoveToContent();
                     }
                 }
-
-                reader.MoveToContent();
-                //_dictionaryElements.Add(entity.Key, entity);
-
-                if (!reader.Read())
-                {
-                    break;
-                }
             }
-
-            //reader.ReadEndElement();
         }
     }
 }
